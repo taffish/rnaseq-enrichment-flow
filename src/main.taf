@@ -1,0 +1,648 @@
+ARGS
+<(--gene-list)gene-list>
+<(--ranked-genes)ranked-genes>
+<!(--gene-sets)gene-sets>
+<(--background)background>
+<!(--outdir/-o)outdir>
+<(--id-column)id-column>
+  gene_id
+<(--score-column)score-column>
+  score
+<(--min-size)min-size>
+  2
+<(--max-size)max-size>
+  500
+<(--pvalue-cutoff)pvalue-cutoff>
+  1
+<(--padj-method)padj-method>
+  BH
+<(--top-n)top-n>
+  20
+<(--seed)seed>
+  1
+
+RUN
+<taffish>
+set -eu
+
+FLOW_NAME="rnaseq-enrichment-flow"
+FLOW_VERSION="0.1.0-r1"
+
+gene_list_arg="::gene-list::"
+ranked_genes_arg="::ranked-genes::"
+gene_sets_arg="::!(--gene-sets)gene-sets::"
+background_arg="::background::"
+outdir="::!(--outdir/-o)outdir::"
+id_column="::id-column::"
+score_column="::score-column::"
+min_size="::min-size::"
+max_size="::max-size::"
+pvalue_cutoff="::pvalue-cutoff::"
+padj_method="::padj-method::"
+top_n="::top-n::"
+seed="::seed::"
+force_arg="::(--force)force?::"
+
+export normalized_gene_list normalized_ranked_genes normalized_background local_gene_sets enrich_run_dir
+export min_size max_size pvalue_cutoff padj_method top_n seed
+
+flow_log=""
+
+log() {
+    printf '%s [%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$FLOW_NAME" "$*" >&2
+    if [ -n "$flow_log" ]; then
+        printf '%s [%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$FLOW_NAME" "$*" >> "$flow_log"
+    fi
+}
+
+fail() {
+    log "ERROR: $*"
+    exit 1
+}
+
+sq() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+json_string() {
+    printf '%s' "$1" | awk '
+        BEGIN {
+            ORS = ""
+            bs = sprintf("%c", 92)
+            dq = sprintf("%c", 34)
+            tabc = sprintf("%c", 9)
+            cr = sprintf("%c", 13)
+            printf dq
+        }
+        {
+            for (i = 1; i <= length($0); i++) {
+                c = substr($0, i, 1)
+                if (c == bs) {
+                    printf "%s%s", bs, bs
+                } else if (c == dq) {
+                    printf "%s%s", bs, dq
+                } else if (c == tabc) {
+                    printf "%st", bs
+                } else if (c == cr) {
+                    printf "%sr", bs
+                } else {
+                    printf "%s", c
+                }
+            }
+        }
+        END {
+            printf dq
+        }
+    '
+}
+
+resolve_path() {
+    path_value=$1
+    base_dir=$2
+    case "$path_value" in
+        /*) printf '%s\n' "$path_value" ;;
+        *) printf '%s/%s\n' "$base_dir" "$path_value" ;;
+    esac
+}
+
+is_true() {
+    case "$1" in
+        T|t|true|TRUE|True|1|yes|YES|Yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_integer() {
+    awk -v x="$1" 'BEGIN { exit !(x ~ /^[0-9]+$/) }'
+}
+
+is_decimal() {
+    awk -v x="$1" 'BEGIN { exit !(x ~ /^[0-9]+([.][0-9]+)?$/) }'
+}
+
+normalize_gene_ids() {
+    input_file=$1
+    output_file=$2
+    id_name=$3
+    label=$4
+    allow_empty=$5
+    awk -F '\t' -v OFS='\t' -v out="$output_file" -v id="$id_name" -v label="$label" -v allow_empty="$allow_empty" '
+        function trim(x) {
+            gsub(/^[ \t\r]+/, "", x)
+            gsub(/[ \t\r]+$/, "", x)
+            return x
+        }
+        function die(msg) {
+            print "ERROR: " label ": " msg > "/dev/stderr"
+            exit 2
+        }
+        function emit(x) {
+            x = trim(x)
+            if (x == "") return
+            if (seen[x]++) die("duplicate gene ID: " x)
+            print x > out
+            count++
+        }
+        BEGIN {
+            print "gene_id" > out
+        }
+        NR == 1 {
+            col = 0
+            for (i = 1; i <= NF; i++) if ($i == id) col = i
+            if (col > 0) {
+                has_header = 1
+                next
+            }
+            if (NF == 1) {
+                col = 1
+            } else {
+                die("missing column " id)
+            }
+        }
+        /^[ \t\r]*$/ { next }
+        {
+            if (col < 1 || col > NF) die("missing gene ID field on line " NR)
+            emit($col)
+        }
+        END {
+            if (count == 0 && allow_empty != "yes") die("contains no gene IDs")
+            print count + 0
+        }
+    ' "$input_file"
+}
+
+normalize_ranked_genes() {
+    input_file=$1
+    output_file=$2
+    id_name=$3
+    score_name=$4
+    awk -F '\t' -v OFS='\t' -v out="$output_file" -v id="$id_name" -v score="$score_name" '
+        function trim(x) {
+            gsub(/^[ \t\r]+/, "", x)
+            gsub(/[ \t\r]+$/, "", x)
+            return x
+        }
+        function die(msg) {
+            print "ERROR: ranked genes: " msg > "/dev/stderr"
+            exit 2
+        }
+        BEGIN {
+            print "gene_id", "score" > out
+        }
+        NR == 1 {
+            id_col = 0
+            score_col = 0
+            for (i = 1; i <= NF; i++) {
+                if ($i == id) id_col = i
+                if ($i == score) score_col = i
+            }
+            if (id_col == 0) die("missing column " id)
+            if (score_col == 0) die("missing column " score)
+            next
+        }
+        /^[ \t\r]*$/ { next }
+        {
+            gene = trim($id_col)
+            value = trim($score_col)
+            if (gene == "" || value == "") next
+            if (value !~ /^[-+]?[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$/) {
+                die("non-numeric score on line " NR ": " value)
+            }
+            if (seen[gene]++) die("duplicate gene ID: " gene)
+            print gene, value > out
+            count++
+        }
+        END {
+            if (count == 0) die("contains no valid gene_id/score rows")
+            print count + 0
+        }
+    ' "$input_file"
+}
+
+gmt_stats() {
+    input_file=$1
+    output_file=$2
+    awk -F '\t' -v OFS='\t' -v out="$output_file" '
+        function trim(x) {
+            gsub(/^[ \t\r]+/, "", x)
+            gsub(/[ \t\r]+$/, "", x)
+            return x
+        }
+        function die(msg) {
+            print "ERROR: gene sets GMT: " msg > "/dev/stderr"
+            exit 2
+        }
+        BEGIN {
+            min_size = -1
+        }
+        /^[ \t\r]*$/ { next }
+        NF < 3 {
+            die("line " NR " has fewer than 3 fields")
+        }
+        {
+            set_id = trim($1)
+            if (set_id == "") die("empty gene set ID on line " NR)
+            if (seen_set[set_id]++) die("duplicate gene set ID: " set_id)
+            size = 0
+            for (i = 3; i <= NF; i++) {
+                gene = trim($i)
+                if (gene == "") continue
+                key = set_id SUBSEP gene
+                if (!(key in seen_pair)) {
+                    seen_pair[key] = 1
+                    size++
+                }
+                if (!(gene in seen_gene)) {
+                    seen_gene[gene] = 1
+                    unique_genes++
+                }
+            }
+            if (size > 0) {
+                sets++
+                if (min_size < 0 || size < min_size) min_size = size
+                if (size > max_size) max_size = size
+            }
+        }
+        END {
+            if (sets == 0) die("contains no usable gene sets")
+            print "metric", "value" > out
+            print "gene_sets", sets > out
+            print "unique_genes", unique_genes + 0 > out
+            print "min_set_size", min_size > out
+            print "max_set_size", max_size + 0 > out
+        }
+    ' "$input_file"
+}
+
+metric_value() {
+    metric_file=$1
+    metric_name=$2
+    awk -F '\t' -v key="$metric_name" '$1 == key { print $2; found = 1; exit } END { if (!found) print 0 }' "$metric_file"
+}
+
+record_command() {
+    step_name=$1
+    cmd=$2
+    printf '\n# [%s]\n%s\n' "$step_name" "$cmd" >> "$commands_file"
+}
+
+for core_cmd in awk cat chmod cp date grep mkdir rm sed sh sort wc; do
+    command -v "$core_cmd" >/dev/null 2>&1 || fail "missing required shell utility: $core_cmd"
+done
+
+is_integer "$min_size" || fail "--min-size must be a positive integer"
+[ "$min_size" -gt 0 ] || fail "--min-size must be greater than zero"
+is_integer "$max_size" || fail "--max-size must be a positive integer"
+[ "$max_size" -ge "$min_size" ] || fail "--max-size must be greater than or equal to --min-size"
+is_integer "$top_n" || fail "--top-n must be a positive integer"
+[ "$top_n" -gt 0 ] || fail "--top-n must be greater than zero"
+is_integer "$seed" || fail "--seed must be a non-negative integer"
+is_decimal "$pvalue_cutoff" || fail "--pvalue-cutoff must be a number between 0 and 1"
+awk -v x="$pvalue_cutoff" 'BEGIN { exit !(x >= 0 && !(x > 1)) }' || fail "--pvalue-cutoff must be between 0 and 1"
+
+case "$padj_method" in
+    holm|hochberg|hommel|bonferroni|BH|BY|fdr|none) ;;
+    *) fail "--padj-method must be one of: holm, hochberg, hommel, bonferroni, BH, BY, fdr, none" ;;
+esac
+
+[ -n "$gene_list_arg" ] || [ -n "$ranked_genes_arg" ] || fail "at least one of --gene-list or --ranked-genes is required"
+
+case "$outdir" in
+    ''|'.'|'..'|'/') fail "--outdir must be a dedicated output directory" ;;
+esac
+
+cwd=$(pwd)
+gene_sets_path=$(resolve_path "$gene_sets_arg" "$cwd")
+outdir=$(resolve_path "$outdir" "$cwd")
+
+[ -r "$gene_sets_path" ] || fail "cannot read --gene-sets: $gene_sets_path"
+
+have_gene_list=no
+have_ranked_genes=no
+have_background=no
+if [ -n "$gene_list_arg" ]; then
+    gene_list_path=$(resolve_path "$gene_list_arg" "$cwd")
+    [ -r "$gene_list_path" ] || fail "cannot read --gene-list: $gene_list_path"
+    have_gene_list=yes
+else
+    gene_list_path=""
+fi
+if [ -n "$ranked_genes_arg" ]; then
+    ranked_genes_path=$(resolve_path "$ranked_genes_arg" "$cwd")
+    [ -r "$ranked_genes_path" ] || fail "cannot read --ranked-genes: $ranked_genes_path"
+    have_ranked_genes=yes
+else
+    ranked_genes_path=""
+fi
+if [ -n "$background_arg" ]; then
+    background_path=$(resolve_path "$background_arg" "$cwd")
+    [ -r "$background_path" ] || fail "cannot read --background: $background_path"
+    have_background=yes
+else
+    background_path=""
+fi
+
+if [ -e "$outdir" ]; then
+    if is_true "$force_arg"; then
+        [ -d "$outdir" ] || fail "--outdir exists and is not a directory: $outdir"
+        rm -rf "$outdir/00_inputs" "$outdir/01_logs" "$outdir/02_intermediate" "$outdir/03_results" "$outdir/04_reports" "$outdir/run.manifest.json"
+    else
+        fail "--outdir already exists: $outdir (use --force to replace rnaseq-enrichment-flow outputs)"
+    fi
+fi
+
+inputs_dir="$outdir/00_inputs"
+logs_dir="$outdir/01_logs"
+logs_steps_dir="$logs_dir/steps"
+intermediate_dir="$outdir/02_intermediate"
+enrich_run_dir="$intermediate_dir/enrichment-r"
+results_dir="$outdir/03_results"
+enrichment_dir="$results_dir/enrichment"
+reports_dir="$outdir/04_reports"
+
+mkdir -p \
+    "$inputs_dir" \
+    "$logs_steps_dir" \
+    "$enrich_run_dir" \
+    "$enrichment_dir" \
+    "$reports_dir"
+
+flow_log="$logs_dir/flow.log"
+commands_file="$reports_dir/commands.sh"
+versions_file="$reports_dir/versions.tsv"
+methods_file="$reports_dir/methods.txt"
+flow_summary_file="$reports_dir/flow_summary.tsv"
+manifest_file="$outdir/run.manifest.json"
+normalized_gene_list="$intermediate_dir/gene_list.normalized.tsv"
+normalized_ranked_genes="$intermediate_dir/ranked_genes.normalized.tsv"
+normalized_background="$intermediate_dir/background.normalized.tsv"
+gmt_stats_file="$intermediate_dir/gene_sets.stats.tsv"
+local_gene_sets="$inputs_dir/gene_sets.gmt"
+
+started_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+: > "$flow_log"
+{
+    printf '#!/bin/sh\n'
+    printf 'set -eu\n\n'
+    printf '# Generated by %s %s at %s\n' "$FLOW_NAME" "$FLOW_VERSION" "$started_at"
+    printf '# Re-run from a shell with the same input paths and TAFFISH dependency commands in PATH.\n\n'
+} > "$commands_file"
+chmod +x "$commands_file"
+
+{
+    printf 'tool\tversion\tsource\n'
+    printf 'rnaseq-enrichment-flow\t%s\ttaffish flow\n' "$FLOW_VERSION"
+    printf 'taf-enrichment-r\t0.1.0-r1\ttaffish dependency\n'
+} > "$versions_file"
+
+log "begin $FLOW_NAME $FLOW_VERSION"
+
+cp "$gene_sets_path" "$local_gene_sets"
+if [ "$have_gene_list" = yes ]; then
+    cp "$gene_list_path" "$inputs_dir/gene_list.tsv"
+fi
+if [ "$have_ranked_genes" = yes ]; then
+    cp "$ranked_genes_path" "$inputs_dir/ranked_genes.tsv"
+fi
+if [ "$have_background" = yes ]; then
+    cp "$background_path" "$inputs_dir/background.tsv"
+fi
+
+gene_list_count=0
+ranked_gene_count=0
+background_count=0
+gene_set_count=0
+gmt_gene_count=0
+
+log "START 01_validate_inputs"
+if {
+    printf 'gene_sets\t%s\n' "$gene_sets_path"
+    [ "$have_gene_list" = no ] || printf 'gene_list\t%s\n' "$gene_list_path"
+    [ "$have_ranked_genes" = no ] || printf 'ranked_genes\t%s\n' "$ranked_genes_path"
+    [ "$have_background" = no ] || printf 'background\t%s\n' "$background_path"
+    printf 'id_column\t%s\n' "$id_column"
+    printf 'score_column\t%s\n' "$score_column"
+    printf 'min_size\t%s\n' "$min_size"
+    printf 'max_size\t%s\n' "$max_size"
+
+    gmt_stats "$local_gene_sets" "$gmt_stats_file"
+    cat "$gmt_stats_file"
+    gene_set_count=$(metric_value "$gmt_stats_file" gene_sets)
+    gmt_gene_count=$(metric_value "$gmt_stats_file" unique_genes)
+
+    if [ "$have_gene_list" = yes ]; then
+        gene_list_count=$(normalize_gene_ids "$inputs_dir/gene_list.tsv" "$normalized_gene_list" "$id_column" "gene list" yes)
+    fi
+    if [ "$have_ranked_genes" = yes ]; then
+        ranked_gene_count=$(normalize_ranked_genes "$inputs_dir/ranked_genes.tsv" "$normalized_ranked_genes" "$id_column" "$score_column")
+    fi
+    if [ "$have_background" = yes ]; then
+        background_count=$(normalize_gene_ids "$inputs_dir/background.tsv" "$normalized_background" "$id_column" "background" no)
+    fi
+
+    if [ "$gene_list_count" -eq 0 ] && [ "$ranked_gene_count" -eq 0 ]; then
+        printf 'ERROR: --gene-list contains no genes and no usable --ranked-genes was provided\n' >&2
+        exit 2
+    fi
+
+    if [ "$have_background" = yes ] && [ "$gene_list_count" -gt 0 ]; then
+        missing_in_background=$(awk -F '\t' '
+            FNR == NR {
+                if (FNR > 1) bg[$1] = 1
+                next
+            }
+            FNR > 1 && !($1 in bg) { missing++ }
+            END { print missing + 0 }
+        ' "$normalized_background" "$normalized_gene_list")
+        if [ "$missing_in_background" -gt 0 ]; then
+            printf 'ERROR: gene list has %s genes outside --background\n' "$missing_in_background" >&2
+            exit 2
+        fi
+    else
+        missing_in_background=0
+    fi
+
+    gene_list_gmt_overlap=0
+    ranked_gmt_overlap=0
+    if [ "$gene_list_count" -gt 0 ]; then
+        gene_list_gmt_overlap=$(awk -F '\t' '
+            FNR == NR {
+                for (i = 3; i <= NF; i++) gmt[$i] = 1
+                next
+            }
+            FNR > 1 && ($1 in gmt) { overlap++ }
+            END { print overlap + 0 }
+        ' "$local_gene_sets" "$normalized_gene_list")
+    fi
+    if [ "$ranked_gene_count" -gt 0 ]; then
+        ranked_gmt_overlap=$(awk -F '\t' '
+            FNR == NR {
+                for (i = 3; i <= NF; i++) gmt[$i] = 1
+                next
+            }
+            FNR > 1 && ($1 in gmt) { overlap++ }
+            END { print overlap + 0 }
+        ' "$local_gene_sets" "$normalized_ranked_genes")
+    fi
+    if [ "$gene_list_count" -gt 0 ] && [ "$gene_list_gmt_overlap" -eq 0 ]; then
+        printf 'ERROR: gene list has no overlap with --gene-sets\n' >&2
+        exit 2
+    fi
+    if [ "$ranked_gene_count" -gt 0 ] && [ "$ranked_gmt_overlap" -eq 0 ]; then
+        printf 'ERROR: ranked genes have no overlap with --gene-sets\n' >&2
+        exit 2
+    fi
+
+    printf 'gene_list_count\t%s\n' "$gene_list_count"
+    printf 'ranked_gene_count\t%s\n' "$ranked_gene_count"
+    printf 'background_count\t%s\n' "$background_count"
+    printf 'gene_list_gmt_overlap\t%s\n' "$gene_list_gmt_overlap"
+    printf 'ranked_gmt_overlap\t%s\n' "$ranked_gmt_overlap"
+    printf 'gene_list_missing_background\t%s\n' "$missing_in_background"
+} > "$logs_steps_dir/01_validate_inputs.log" 2>&1; then
+    log "DONE  01_validate_inputs"
+else
+    log "FAIL  01_validate_inputs; see $logs_steps_dir/01_validate_inputs.log"
+    exit 1
+fi
+
+enrich_cmd="taf-enrichment-r-v0.1.0-r1"
+if [ "$gene_list_count" -gt 0 ]; then
+    enrich_cmd="$enrich_cmd --gene-list $(sq "$normalized_gene_list")"
+fi
+if [ "$ranked_gene_count" -gt 0 ]; then
+    enrich_cmd="$enrich_cmd --ranked-genes $(sq "$normalized_ranked_genes")"
+fi
+enrich_cmd="$enrich_cmd --gene-sets $(sq "$local_gene_sets") --outdir $(sq "$enrich_run_dir") --id-column gene_id --score-column score --min-size $(sq "$min_size") --max-size $(sq "$max_size") --pvalue-cutoff $(sq "$pvalue_cutoff") --padj-method $(sq "$padj_method") --top-n $(sq "$top_n") --seed $(sq "$seed") --overwrite"
+if [ "$have_background" = yes ] && [ "$gene_list_count" -gt 0 ]; then
+    enrich_cmd="$enrich_cmd --background $(sq "$normalized_background")"
+fi
+
+step_name="02_enrichment"
+step_log="$logs_steps_dir/${step_name}.log"
+record_command "$step_name" "$enrich_cmd"
+log "START $step_name"
+if {
+    printf '# step: %s\n' "$step_name"
+    printf '# command: %s\n' "$enrich_cmd"
+    if [ "$gene_list_count" -gt 0 ] && [ "$ranked_gene_count" -gt 0 ] && [ "$have_background" = yes ]; then
+        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --ranked-genes '"$normalized_ranked_genes"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite --background '"$normalized_background"' ]] </dev/null
+    elif [ "$gene_list_count" -gt 0 ] && [ "$ranked_gene_count" -gt 0 ]; then
+        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --ranked-genes '"$normalized_ranked_genes"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite ]] </dev/null
+    elif [ "$gene_list_count" -gt 0 ] && [ "$have_background" = yes ]; then
+        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite --background '"$normalized_background"' ]] </dev/null
+    elif [ "$gene_list_count" -gt 0 ]; then
+        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite ]] </dev/null
+    else
+        [[taf: taf-enrichment-r-v0.1.0-r1 --ranked-genes '"$normalized_ranked_genes"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite ]] </dev/null
+    fi
+} > "$step_log" 2>&1; then
+    log "DONE  $step_name"
+else
+    status=$?
+    log "FAIL  $step_name; see $step_log"
+    exit "$status"
+fi
+
+cp "$enrich_run_dir/ora_results.tsv" "$enrichment_dir/ora_results.tsv"
+cp "$enrich_run_dir/gsea_results.tsv" "$enrichment_dir/gsea_results.tsv"
+cp "$enrich_run_dir/enrichment_summary.tsv" "$enrichment_dir/enrichment_summary.tsv"
+cp "$enrich_run_dir/dotplot.pdf" "$enrichment_dir/dotplot.pdf"
+cp "$enrich_run_dir/dotplot.png" "$enrichment_dir/dotplot.png"
+cp "$enrich_run_dir/versions.tsv" "$reports_dir/enrichment_versions.tsv"
+cp "$enrich_run_dir/run.manifest.json" "$intermediate_dir/enrichment-r.run.manifest.json"
+
+ora_result_count=$(metric_value "$enrichment_dir/enrichment_summary.tsv" ora_result_count)
+gsea_result_count=$(metric_value "$enrichment_dir/enrichment_summary.tsv" gsea_result_count)
+plot_source=$(metric_value "$enrichment_dir/enrichment_summary.tsv" plot_source)
+background_source=$(metric_value "$enrichment_dir/enrichment_summary.tsv" background_source)
+
+{
+    printf 'metric\tvalue\n'
+    printf 'flow\t%s\n' "$FLOW_NAME"
+    printf 'version\t%s\n' "$FLOW_VERSION"
+    printf 'gene_sets\t%s\n' "$gene_set_count"
+    printf 'gmt_unique_genes\t%s\n' "$gmt_gene_count"
+    printf 'gene_list_genes\t%s\n' "$gene_list_count"
+    printf 'ranked_genes\t%s\n' "$ranked_gene_count"
+    printf 'background_genes\t%s\n' "$background_count"
+    printf 'gene_list_gmt_overlap\t%s\n' "$gene_list_gmt_overlap"
+    printf 'ranked_gmt_overlap\t%s\n' "$ranked_gmt_overlap"
+    printf 'ora_result_count\t%s\n' "$ora_result_count"
+    printf 'gsea_result_count\t%s\n' "$gsea_result_count"
+    printf 'plot_source\t%s\n' "$plot_source"
+    printf 'background_source\t%s\n' "$background_source"
+    printf 'min_size\t%s\n' "$min_size"
+    printf 'max_size\t%s\n' "$max_size"
+    printf 'pvalue_cutoff\t%s\n' "$pvalue_cutoff"
+    printf 'padj_method\t%s\n' "$padj_method"
+} > "$flow_summary_file"
+
+{
+    printf 'rnaseq-enrichment-flow %s ran offline GMT-based enrichment analysis. ' "$FLOW_VERSION"
+    if [ "$gene_list_count" -gt 0 ]; then
+        printf 'ORA used %s query genes' "$gene_list_count"
+        if [ "$have_background" = yes ]; then
+            printf ' against an explicit background of %s genes. ' "$background_count"
+        else
+            printf ' against the union of genes in the GMT file. '
+        fi
+    else
+        printf 'ORA was skipped because no non-empty gene list was provided. '
+    fi
+    if [ "$ranked_gene_count" -gt 0 ]; then
+        printf 'Preranked GSEA used %s ranked genes. ' "$ranked_gene_count"
+    else
+        printf 'Preranked GSEA was skipped because no ranked gene table was provided. '
+    fi
+    printf 'Gene sets were read from a user-supplied GMT file; gene identifiers were treated as exact strings with no ID conversion, organism inference, online lookup, or gene-set download. '
+    printf 'Parameters were min_size=%s, max_size=%s, pvalue_cutoff=%s, padj_method=%s, top_n=%s, seed=%s.\n' "$min_size" "$max_size" "$pvalue_cutoff" "$padj_method" "$top_n" "$seed"
+} > "$methods_file"
+
+finished_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+{
+    printf '{\n'
+    printf '  "flow": "rnaseq-enrichment-flow",\n'
+    printf '  "version": %s,\n' "$(json_string "$FLOW_VERSION")"
+    printf '  "started_at": %s,\n' "$(json_string "$started_at")"
+    printf '  "finished_at": %s,\n' "$(json_string "$finished_at")"
+    printf '  "inputs": {\n'
+    printf '    "gene_list": %s,\n' "$(json_string "$gene_list_path")"
+    printf '    "ranked_genes": %s,\n' "$(json_string "$ranked_genes_path")"
+    printf '    "gene_sets": %s,\n' "$(json_string "$gene_sets_path")"
+    printf '    "background": %s\n' "$(json_string "$background_path")"
+    printf '  },\n'
+    printf '  "parameters": {\n'
+    printf '    "id_column": %s,\n' "$(json_string "$id_column")"
+    printf '    "score_column": %s,\n' "$(json_string "$score_column")"
+    printf '    "min_size": %s,\n' "$min_size"
+    printf '    "max_size": %s,\n' "$max_size"
+    printf '    "pvalue_cutoff": %s,\n' "$pvalue_cutoff"
+    printf '    "padj_method": %s,\n' "$(json_string "$padj_method")"
+    printf '    "top_n": %s,\n' "$top_n"
+    printf '    "seed": %s\n' "$seed"
+    printf '  },\n'
+    printf '  "dependencies": {\n'
+    printf '    "taf-enrichment-r": "0.1.0-r1"\n'
+    printf '  },\n'
+    printf '  "counts": {\n'
+    printf '    "gene_sets": %s,\n' "$gene_set_count"
+    printf '    "gene_list_genes": %s,\n' "$gene_list_count"
+    printf '    "ranked_genes": %s,\n' "$ranked_gene_count"
+    printf '    "background_genes": %s,\n' "$background_count"
+    printf '    "ora_result_count": %s,\n' "$ora_result_count"
+    printf '    "gsea_result_count": %s\n' "$gsea_result_count"
+    printf '  },\n'
+    printf '  "outputs": {\n'
+    printf '    "ora_results": %s,\n' "$(json_string "$enrichment_dir/ora_results.tsv")"
+    printf '    "gsea_results": %s,\n' "$(json_string "$enrichment_dir/gsea_results.tsv")"
+    printf '    "enrichment_summary": %s,\n' "$(json_string "$enrichment_dir/enrichment_summary.tsv")"
+    printf '    "dotplot_pdf": %s,\n' "$(json_string "$enrichment_dir/dotplot.pdf")"
+    printf '    "dotplot_png": %s,\n' "$(json_string "$enrichment_dir/dotplot.png")"
+    printf '    "flow_summary": %s\n' "$(json_string "$flow_summary_file")"
+    printf '  }\n'
+    printf '}\n'
+} > "$manifest_file"
+
+log "completed. Results: $enrichment_dir"
+log "reports: $reports_dir"

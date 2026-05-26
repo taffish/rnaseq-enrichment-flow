@@ -1,0 +1,3 @@
+set_alpha	Alpha pathway	A	B	C	D
+set_beta	Beta pathway	E	F	G	H
+set_gamma	Gamma pathway	A	E	I	J

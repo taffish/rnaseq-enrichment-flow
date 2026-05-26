@@ -87,7 +87,7 @@ taf check
 echo "[FORMAL] taf build"
 taf build
 
-flow_cmd="$project_dir/target/taf-rnaseq-enrichment-flow-v0.1.0-r1"
+flow_cmd="$project_dir/target/taf-rnaseq-enrichment-flow-v0.1.0-r2"
 if [ ! -x "$flow_cmd" ]; then
     echo "formal: built flow command is missing or not executable: $flow_cmd" >&2
     exit 1
@@ -155,6 +155,9 @@ test -s "$out/03_results/enrichment/gsea_results.tsv"
 test -s "$out/03_results/enrichment/enrichment_summary.tsv"
 test -s "$out/03_results/enrichment/dotplot.pdf"
 test -s "$out/03_results/enrichment/dotplot.png"
+test -s "$out/03_results/enrichment/dotplot.original.pdf"
+test -s "$out/03_results/enrichment/dotplot.original.png"
+test -s "$out/03_results/enrichment/dotplot_source.tsv"
 test -s "$out/04_reports/commands.sh"
 test -s "$out/04_reports/versions.tsv"
 test -s "$out/04_reports/enrichment_versions.tsv"
@@ -164,6 +167,9 @@ test -s "$out/run.manifest.json"
 
 grep -F 'gene_sets	2274' "$out/04_reports/flow_summary.tsv" >/dev/null
 grep -F 'background_genes	7127' "$out/04_reports/flow_summary.tsv" >/dev/null
+grep -F 'plot_terms	20' "$out/04_reports/flow_summary.tsv" >/dev/null
+grep -F 'plot_label_wrap_width	48' "$out/04_reports/flow_summary.tsv" >/dev/null
+grep -F 'plot_renderer	rnaseq-enrichment-flow' "$out/03_results/enrichment/dotplot_source.tsv" >/dev/null
 grep -F 'taf-enrichment-r-v0.1.0-r1' "$out/04_reports/commands.sh" >/dev/null
 grep -F '"flow": "rnaseq-enrichment-flow"' "$out/run.manifest.json" >/dev/null
 

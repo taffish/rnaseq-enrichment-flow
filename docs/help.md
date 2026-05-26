@@ -1,14 +1,15 @@
-rnaseq-enrichment-flow 0.1.0-r1
+rnaseq-enrichment-flow 0.1.0-r2
 
 Purpose:
   Run offline RNA-seq enrichment interpretation from DE gene lists, ranked
   genes, a GMT gene-set file, and an optional explicit background. The flow
-  writes ORA and preranked GSEA tables, a dotplot, summaries, logs, commands,
-  versions, methods, and a manifest under one explicit output directory.
+  writes ORA and preranked GSEA tables, a readable wrapped-label dotplot,
+  summaries, logs, commands, versions, methods, and a manifest under one
+  explicit output directory.
 
 Flow family role:
   This is a TAFFISH RNA-seq subflow. It can be run directly from compatible DE
-  gene-list inputs, and its enrichment outputs are intended for future
+  gene-list inputs, and its enrichment outputs are intended for
   rnaseq-standard-flow orchestration.
 
 Usage:
@@ -61,7 +62,9 @@ Common options:
       P-value adjustment method for ORA. Default: BH.
 
   --top-n N
-      Number of terms shown in the dotplot. Default: 20.
+      Number of terms shown in the dotplot. Default: 20. Long term labels are
+      wrapped in the final r2 dotplot; the dependency-generated original plot
+      is kept as dotplot.original.pdf/png.
 
   --seed N
       Random seed for fgsea. Default: 1.
@@ -92,12 +95,16 @@ Output tree:
   <outdir>/01_logs/flow.log
   <outdir>/01_logs/steps/01_validate_inputs.log
   <outdir>/01_logs/steps/02_enrichment.log
+  <outdir>/01_logs/steps/03_render_dotplot.log
   <outdir>/02_intermediate/
   <outdir>/03_results/enrichment/ora_results.tsv
   <outdir>/03_results/enrichment/gsea_results.tsv
   <outdir>/03_results/enrichment/enrichment_summary.tsv
   <outdir>/03_results/enrichment/dotplot.pdf
   <outdir>/03_results/enrichment/dotplot.png
+  <outdir>/03_results/enrichment/dotplot.original.pdf
+  <outdir>/03_results/enrichment/dotplot.original.png
+  <outdir>/03_results/enrichment/dotplot_source.tsv
   <outdir>/04_reports/commands.sh
   <outdir>/04_reports/versions.tsv
   <outdir>/04_reports/enrichment_versions.tsv
@@ -109,7 +116,7 @@ Dependencies:
   taf-enrichment-r 0.1.0-r1
 
 Boundaries:
-  r1 is offline and GMT-driven. It does not generate DE results, download
+  r2 is offline and GMT-driven. It does not generate DE results, download
   gene sets, infer organisms, convert gene IDs, run online KEGG/MSigDB/Enrichr
   queries, or decide biological interpretation. Gene set source, ID system,
   background universe, and thresholds remain user responsibilities.

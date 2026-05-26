@@ -26,7 +26,7 @@ RUN
 set -eu
 
 FLOW_NAME="rnaseq-enrichment-flow"
-FLOW_VERSION="0.1.0-r1"
+FLOW_VERSION="0.1.0-r2"
 
 gene_list_arg="::gene-list::"
 ranked_genes_arg="::ranked-genes::"
@@ -44,6 +44,7 @@ seed="::seed::"
 force_arg="::(--force)force?::"
 
 export normalized_gene_list normalized_ranked_genes normalized_background local_gene_sets enrich_run_dir
+export enrichment_dir plot_script plot_metadata_file plot_work_dir plot_label_wrap_width
 export min_size max_size pvalue_cutoff padj_method top_n seed
 
 flow_log=""
@@ -356,6 +357,7 @@ logs_dir="$outdir/01_logs"
 logs_steps_dir="$logs_dir/steps"
 intermediate_dir="$outdir/02_intermediate"
 enrich_run_dir="$intermediate_dir/enrichment-r"
+plot_work_dir="$intermediate_dir/plot"
 results_dir="$outdir/03_results"
 enrichment_dir="$results_dir/enrichment"
 reports_dir="$outdir/04_reports"
@@ -378,6 +380,9 @@ normalized_ranked_genes="$intermediate_dir/ranked_genes.normalized.tsv"
 normalized_background="$intermediate_dir/background.normalized.tsv"
 gmt_stats_file="$intermediate_dir/gene_sets.stats.tsv"
 local_gene_sets="$inputs_dir/gene_sets.gmt"
+plot_script="$plot_work_dir/render_dotplot.R"
+plot_metadata_file="$enrichment_dir/dotplot_source.tsv"
+plot_label_wrap_width=48
 
 started_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 : > "$flow_log"
@@ -547,8 +552,8 @@ fi
 cp "$enrich_run_dir/ora_results.tsv" "$enrichment_dir/ora_results.tsv"
 cp "$enrich_run_dir/gsea_results.tsv" "$enrichment_dir/gsea_results.tsv"
 cp "$enrich_run_dir/enrichment_summary.tsv" "$enrichment_dir/enrichment_summary.tsv"
-cp "$enrich_run_dir/dotplot.pdf" "$enrichment_dir/dotplot.pdf"
-cp "$enrich_run_dir/dotplot.png" "$enrichment_dir/dotplot.png"
+cp "$enrich_run_dir/dotplot.pdf" "$enrichment_dir/dotplot.original.pdf"
+cp "$enrich_run_dir/dotplot.png" "$enrichment_dir/dotplot.original.png"
 cp "$enrich_run_dir/versions.tsv" "$reports_dir/enrichment_versions.tsv"
 cp "$enrich_run_dir/run.manifest.json" "$intermediate_dir/enrichment-r.run.manifest.json"
 
@@ -556,6 +561,179 @@ ora_result_count=$(metric_value "$enrichment_dir/enrichment_summary.tsv" ora_res
 gsea_result_count=$(metric_value "$enrichment_dir/enrichment_summary.tsv" gsea_result_count)
 plot_source=$(metric_value "$enrichment_dir/enrichment_summary.tsv" plot_source)
 background_source=$(metric_value "$enrichment_dir/enrichment_summary.tsv" background_source)
+
+mkdir -p "$plot_work_dir"
+cat > "$plot_script" <<'RSCRIPT'
+suppressPackageStartupMessages({
+  library(data.table)
+  library(ggplot2)
+})
+
+args <- commandArgs(trailingOnly = TRUE)
+if (length(args) != 7L) {
+  stop("usage: render_dotplot.R ORA_TSV GSEA_TSV PDF PNG METADATA TOP_N WRAP_WIDTH", call. = FALSE)
+}
+
+ora_path <- args[[1L]]
+gsea_path <- args[[2L]]
+pdf_path <- args[[3L]]
+png_path <- args[[4L]]
+metadata_path <- args[[5L]]
+top_n <- as.integer(args[[6L]])
+wrap_width <- as.integer(args[[7L]])
+if (is.na(top_n) || top_n < 1L) top_n <- 20L
+if (is.na(wrap_width) || wrap_width < 20L) wrap_width <- 48L
+
+read_result <- function(path) {
+  if (!file.exists(path) || file.info(path)$size == 0) {
+    return(data.table())
+  }
+  fread(path, sep = "\t", header = TRUE, data.table = TRUE)
+}
+
+as_num <- function(x) {
+  suppressWarnings(as.numeric(x))
+}
+
+wrap_label <- function(x, width) {
+  x <- ifelse(is.na(x) | x == "", "", x)
+  vapply(x, function(one) {
+    lines <- strwrap(one, width = width, simplify = FALSE)[[1L]]
+    if (length(lines) == 0L) {
+      one
+    } else {
+      paste(lines, collapse = "\n")
+    }
+  }, character(1L), USE.NAMES = FALSE)
+}
+
+unique_plot_labels <- function(labels, ids) {
+  labels <- ifelse(is.na(labels) | labels == "", ids, labels)
+  wrapped <- wrap_label(labels, wrap_width)
+  if (anyDuplicated(wrapped)) {
+    wrapped <- ifelse(is.na(ids) | ids == "", wrapped, paste0(wrapped, "\n", ids))
+  }
+  make.unique(wrapped, sep = " ")
+}
+
+plot_theme <- theme_bw(base_size = 10) +
+  theme(
+    axis.text.y = element_text(size = 8, lineheight = 0.9),
+    axis.title.x = element_text(size = 10),
+    plot.title = element_text(size = 11, face = "bold"),
+    legend.title = element_text(size = 9),
+    legend.text = element_text(size = 8),
+    plot.margin = margin(10, 14, 10, 10)
+  )
+
+ora <- read_result(ora_path)
+gsea <- read_result(gsea_path)
+plot_source <- "empty"
+
+if (nrow(ora) > 0L) {
+  ora[, pvalue := as_num(pvalue)]
+  ora[, p.adjust := as_num(p.adjust)]
+  ora[, Count := as_num(Count)]
+  ora <- ora[order(p.adjust, pvalue, ID)]
+  dt <- copy(ora[seq_len(min(top_n, nrow(ora)))])
+  dt[, score := -log10(p.adjust + .Machine$double.xmin)]
+  dt[, label := unique_plot_labels(ifelse(is.na(Description) | Description == "", ID, Description), ID)]
+  dt[, label := factor(label, levels = rev(label))]
+  p <- ggplot(dt, aes(x = score, y = label, size = Count, color = p.adjust)) +
+    geom_point(alpha = 0.9) +
+    scale_color_viridis_c(option = "C", direction = -1) +
+    labs(
+      x = "-log10(adjusted p-value)",
+      y = NULL,
+      size = "Count",
+      color = "Adjusted p",
+      title = "ORA enrichment"
+    ) +
+    plot_theme
+  plot_source <- "ora"
+} else if (nrow(gsea) > 0L) {
+  gsea[, pvalue := as_num(pvalue)]
+  gsea[, p.adjust := as_num(p.adjust)]
+  gsea[, NES := as_num(NES)]
+  gsea[, size := as_num(size)]
+  gsea[, absNES := abs(NES)]
+  gsea <- gsea[order(p.adjust, -absNES, ID)]
+  dt <- copy(gsea[seq_len(min(top_n, nrow(gsea)))])
+  dt[, label := unique_plot_labels(ifelse(is.na(Description) | Description == "", ID, Description), ID)]
+  dt[, label := factor(label, levels = label[order(NES)])]
+  p <- ggplot(dt, aes(x = NES, y = label, size = size, color = p.adjust)) +
+    geom_point(alpha = 0.9) +
+    scale_color_viridis_c(option = "C", direction = -1) +
+    labs(
+      x = "Normalized enrichment score",
+      y = NULL,
+      size = "Size",
+      color = "Adjusted p",
+      title = "GSEA enrichment"
+    ) +
+    plot_theme
+  plot_source <- "gsea"
+} else {
+  dt <- data.table()
+  p <- ggplot() +
+    annotate("text", x = 0, y = 0, label = "No enrichment results", size = 5) +
+    theme_void(base_size = 11)
+}
+
+terms_plotted <- nrow(dt)
+plot_width <- 12.5
+plot_height <- max(5.5, min(15, 3.0 + 0.48 * max(terms_plotted, 1L)))
+
+ggsave(pdf_path, p, width = plot_width, height = plot_height, units = "in", limitsize = FALSE)
+ggsave(png_path, p, width = plot_width, height = plot_height, units = "in", dpi = 200, limitsize = FALSE)
+
+metadata <- data.table(
+  metric = c(
+    "plot_renderer",
+    "plot_source",
+    "plot_terms",
+    "plot_label_wrap_width",
+    "plot_width_inches",
+    "plot_height_inches",
+    "plot_png_dpi"
+  ),
+  value = c(
+    "rnaseq-enrichment-flow",
+    plot_source,
+    as.character(terms_plotted),
+    as.character(wrap_width),
+    as.character(plot_width),
+    as.character(plot_height),
+    "200"
+  )
+)
+fwrite(metadata, metadata_path, sep = "\t")
+RSCRIPT
+
+render_cmd="taf-enrichment-r-v0.1.0-r1 Rscript $(sq "$plot_script") $(sq "$enrichment_dir/ora_results.tsv") $(sq "$enrichment_dir/gsea_results.tsv") $(sq "$enrichment_dir/dotplot.pdf") $(sq "$enrichment_dir/dotplot.png") $(sq "$plot_metadata_file") $(sq "$top_n") $(sq "$plot_label_wrap_width")"
+step_name="03_render_dotplot"
+step_log="$logs_steps_dir/${step_name}.log"
+record_command "$step_name" "$render_cmd"
+log "START $step_name"
+if {
+    printf '# step: %s\n' "$step_name"
+    printf '# command: %s\n' "$render_cmd"
+    [[taf: taf-enrichment-r-v0.1.0-r1 Rscript '"$plot_script"' '"$enrichment_dir/ora_results.tsv"' '"$enrichment_dir/gsea_results.tsv"' '"$enrichment_dir/dotplot.pdf"' '"$enrichment_dir/dotplot.png"' '"$plot_metadata_file"' '"$top_n"' '"$plot_label_wrap_width"' ]] </dev/null
+    test -s "$enrichment_dir/dotplot.pdf" || { printf 'ERROR: missing rendered dotplot.pdf\n' >&2; exit 2; }
+    test -s "$enrichment_dir/dotplot.png" || { printf 'ERROR: missing rendered dotplot.png\n' >&2; exit 2; }
+    test -s "$plot_metadata_file" || { printf 'ERROR: missing dotplot metadata\n' >&2; exit 2; }
+} > "$step_log" 2>&1; then
+    log "DONE  $step_name"
+else
+    status=$?
+    log "FAIL  $step_name; see $step_log"
+    exit "$status"
+fi
+
+rendered_plot_source=$(metric_value "$plot_metadata_file" plot_source)
+plot_terms=$(metric_value "$plot_metadata_file" plot_terms)
+plot_width_inches=$(metric_value "$plot_metadata_file" plot_width_inches)
+plot_height_inches=$(metric_value "$plot_metadata_file" plot_height_inches)
 
 {
     printf 'metric\tvalue\n'
@@ -571,6 +749,11 @@ background_source=$(metric_value "$enrichment_dir/enrichment_summary.tsv" backgr
     printf 'ora_result_count\t%s\n' "$ora_result_count"
     printf 'gsea_result_count\t%s\n' "$gsea_result_count"
     printf 'plot_source\t%s\n' "$plot_source"
+    printf 'rendered_plot_source\t%s\n' "$rendered_plot_source"
+    printf 'plot_terms\t%s\n' "$plot_terms"
+    printf 'plot_label_wrap_width\t%s\n' "$plot_label_wrap_width"
+    printf 'plot_width_inches\t%s\n' "$plot_width_inches"
+    printf 'plot_height_inches\t%s\n' "$plot_height_inches"
     printf 'background_source\t%s\n' "$background_source"
     printf 'min_size\t%s\n' "$min_size"
     printf 'max_size\t%s\n' "$max_size"
@@ -596,6 +779,7 @@ background_source=$(metric_value "$enrichment_dir/enrichment_summary.tsv" backgr
         printf 'Preranked GSEA was skipped because no ranked gene table was provided. '
     fi
     printf 'Gene sets were read from a user-supplied GMT file; gene identifiers were treated as exact strings with no ID conversion, organism inference, online lookup, or gene-set download. '
+    printf 'The final dotplot was re-rendered by the flow with wrapped term labels for readability; the dependency-generated original plot is preserved as dotplot.original.pdf/png. '
     printf 'Parameters were min_size=%s, max_size=%s, pvalue_cutoff=%s, padj_method=%s, top_n=%s, seed=%s.\n' "$min_size" "$max_size" "$pvalue_cutoff" "$padj_method" "$top_n" "$seed"
 } > "$methods_file"
 
@@ -631,7 +815,8 @@ finished_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     printf '    "ranked_genes": %s,\n' "$ranked_gene_count"
     printf '    "background_genes": %s,\n' "$background_count"
     printf '    "ora_result_count": %s,\n' "$ora_result_count"
-    printf '    "gsea_result_count": %s\n' "$gsea_result_count"
+    printf '    "gsea_result_count": %s,\n' "$gsea_result_count"
+    printf '    "plot_terms": %s\n' "$plot_terms"
     printf '  },\n'
     printf '  "outputs": {\n'
     printf '    "ora_results": %s,\n' "$(json_string "$enrichment_dir/ora_results.tsv")"
@@ -639,6 +824,9 @@ finished_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     printf '    "enrichment_summary": %s,\n' "$(json_string "$enrichment_dir/enrichment_summary.tsv")"
     printf '    "dotplot_pdf": %s,\n' "$(json_string "$enrichment_dir/dotplot.pdf")"
     printf '    "dotplot_png": %s,\n' "$(json_string "$enrichment_dir/dotplot.png")"
+    printf '    "dotplot_original_pdf": %s,\n' "$(json_string "$enrichment_dir/dotplot.original.pdf")"
+    printf '    "dotplot_original_png": %s,\n' "$(json_string "$enrichment_dir/dotplot.original.png")"
+    printf '    "dotplot_source": %s,\n' "$(json_string "$plot_metadata_file")"
     printf '    "flow_summary": %s\n' "$(json_string "$flow_summary_file")"
     printf '  }\n'
     printf '}\n'

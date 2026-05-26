@@ -2,7 +2,7 @@
 name = "rnaseq-enrichment-flow"
 kind = "flow"
 version = "0.1.0"
-release = 1
+release = 2
 license = "Apache-2.0"
 main = "src/main.taf"
 
@@ -20,7 +20,7 @@ command_mode = false
 domain = "bio"
 categories = ["rna-seq", "enrichment", "gene-set-analysis", "workflow", "transcriptomics"]
 keywords = ["rnaseq-enrichment-flow", "rna-seq", "enrichment", "ORA", "GSEA", "GMT", "gene-sets", "fgsea", "transcriptomics"]
-description = "TAFFISH RNA-seq enrichment flow for GMT-based ORA/GSEA from DE gene lists, ranked genes, background genes, plots, reports, and provenance."
+description = "TAFFISH RNA-seq enrichment flow for GMT-based ORA/GSEA from DE gene lists, ranked genes, background genes, readable plots, reports, and provenance."
 
 [upstream]
 name = "rnaseq-enrichment-flow"

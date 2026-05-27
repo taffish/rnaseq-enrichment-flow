@@ -66,7 +66,7 @@ echo "[FORMAL] build rnaseq-de-flow"
     taf check
     taf build
 )
-de_flow_cmd="$de_flow_dir/target/taf-rnaseq-de-flow-v0.1.0-r1"
+de_flow_cmd="$de_flow_dir/target/taf-rnaseq-de-flow-v0.1.0-r2"
 if [ ! -x "$de_flow_cmd" ]; then
     echo "formal: built DE flow command is missing or not executable: $de_flow_cmd" >&2
     exit 1
@@ -87,7 +87,7 @@ taf check
 echo "[FORMAL] taf build"
 taf build
 
-flow_cmd="$project_dir/target/taf-rnaseq-enrichment-flow-v0.1.0-r2"
+flow_cmd="$project_dir/target/taf-rnaseq-enrichment-flow-v0.1.0-r3"
 if [ ! -x "$flow_cmd" ]; then
     echo "formal: built flow command is missing or not executable: $flow_cmd" >&2
     exit 1
@@ -157,7 +157,14 @@ test -s "$out/03_results/enrichment/dotplot.pdf"
 test -s "$out/03_results/enrichment/dotplot.png"
 test -s "$out/03_results/enrichment/dotplot.original.pdf"
 test -s "$out/03_results/enrichment/dotplot.original.png"
+test -s "$out/03_results/enrichment/ora_barplot.pdf"
+test -s "$out/03_results/enrichment/ora_barplot.png"
+test -s "$out/03_results/enrichment/gsea_nes_plot.pdf"
+test -s "$out/03_results/enrichment/gsea_nes_plot.png"
+test -s "$out/03_results/enrichment/gsea_enrichment_curves.pdf"
+test -s "$out/03_results/enrichment/gsea_enrichment_curves.png"
 test -s "$out/03_results/enrichment/dotplot_source.tsv"
+test -s "$out/03_results/enrichment/plot_summary.tsv"
 test -s "$out/04_reports/commands.sh"
 test -s "$out/04_reports/versions.tsv"
 test -s "$out/04_reports/enrichment_versions.tsv"
@@ -169,7 +176,10 @@ grep -F 'gene_sets	2274' "$out/04_reports/flow_summary.tsv" >/dev/null
 grep -F 'background_genes	7127' "$out/04_reports/flow_summary.tsv" >/dev/null
 grep -F 'plot_terms	20' "$out/04_reports/flow_summary.tsv" >/dev/null
 grep -F 'plot_label_wrap_width	48' "$out/04_reports/flow_summary.tsv" >/dev/null
+grep -F 'classic_label_wrap_width	72' "$out/04_reports/flow_summary.tsv" >/dev/null
 grep -F 'plot_renderer	rnaseq-enrichment-flow' "$out/03_results/enrichment/dotplot_source.tsv" >/dev/null
+grep -F 'plot_family_version	0.1.0-r3' "$out/03_results/enrichment/dotplot_source.tsv" >/dev/null
+grep -F 'gsea_enrichment_curves' "$out/03_results/enrichment/plot_summary.tsv" >/dev/null
 grep -F 'taf-enrichment-r-v0.1.0-r1' "$out/04_reports/commands.sh" >/dev/null
 grep -F '"flow": "rnaseq-enrichment-flow"' "$out/run.manifest.json" >/dev/null
 

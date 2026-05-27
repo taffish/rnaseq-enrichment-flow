@@ -2,16 +2,16 @@
 
 `taf-rnaseq-enrichment-flow` runs a compact, offline RNA-seq enrichment
 interpretation step from DE gene lists, ranked genes, a GMT gene-set file, and
-an optional explicit background. It writes ORA and preranked GSEA tables, a
-readable wrapped-label dotplot, summaries, logs, commands, versions, methods,
-and a manifest under one explicit output directory.
+an optional explicit background. It writes ORA and preranked GSEA tables,
+publication-oriented enrichment plots, summaries, logs, commands, versions,
+methods, and a manifest under one explicit output directory.
 
 Package identity:
 
 - name: `rnaseq-enrichment-flow`
 - command: `taf-rnaseq-enrichment-flow`
 - kind: `flow`
-- version: `0.1.0-r2`
+- version: `0.1.0-r3`
 - license: Apache-2.0
 
 ## RNA-seq Flow Position
@@ -24,7 +24,7 @@ enrichment contract rather than duplicate its ORA/GSEA logic.
 
 ## Scope
 
-r2 supports:
+r3 supports:
 
 - ORA from a significant gene list
 - preranked GSEA from a ranked gene table
@@ -32,14 +32,18 @@ r2 supports:
 - standard GMT gene-set input
 - explicit background gene universe for ORA
 - readable final dotplots with wrapped long term labels
-- preservation of the dependency-generated original dotplot as
+- optimized classic/original-style dotplots with wider labels as
   `dotplot.original.pdf/png`
+- ORA adjusted-p-value barplots
+- GSEA normalized-enrichment-score plots
+- GSEA running enrichment score curves
+- `plot_summary.tsv` for plot discovery by report flows
 - fixed output tree under `<outdir>/`
 - input snapshots under `<outdir>/00_inputs/`
 - provenance files: `commands.sh`, `versions.tsv`, `methods.txt`,
   `flow_summary.tsv`, and `run.manifest.json`
 
-r2 deliberately does not download MSigDB, KEGG, GO, Reactome, Enrichr, or
+r3 deliberately does not download MSigDB, KEGG, GO, Reactome, Enrichr, or
 g:Profiler data. It does not perform identifier conversion, organism detection,
 gene-set propagation, differential expression, or statistical interpretation
 beyond running the requested offline enrichment route.
@@ -54,7 +58,7 @@ The flow depends on one version-pinned TAFFISH tool app:
 
 The script also uses ordinary shell utilities (`sh`, `awk`, `sed`, `sort`,
 `date`, `mkdir`, `cp`, `rm`, `grep`, and related POSIX tools) for validation,
-bookkeeping, and provenance. The enrichment calculations and r2 plot rendering
+bookkeeping, and provenance. The enrichment calculations and r3 plot rendering
 both run through the explicit `taf-enrichment-r` dependency; the flow does not
 call host-installed R, fgsea, clusterProfiler, or plotting packages.
 
@@ -118,7 +122,7 @@ Common controls:
   Default: `1`.
 - `--padj-method NAME`: p-value adjustment method for ORA. Default: `BH`.
 - `--top-n N`: terms shown in the dotplot. Default: `20`. Long descriptions
-  are wrapped in the final r2 plot so yeast/GO terms remain inspectable.
+  are wrapped in the final r3 plots so yeast/GO terms remain inspectable.
 - `--seed N`: random seed for fgsea. Default: `1`.
 - `--force`: replace the standard rnaseq-enrichment-flow output files inside an
   existing output directory.
@@ -186,6 +190,7 @@ All flow-created outputs are written under `<outdir>/`:
       01_validate_inputs.log
       02_enrichment.log
       03_render_dotplot.log
+      04_render_extra_plots.log
   02_intermediate/
     gene_list.normalized.tsv
     ranked_genes.normalized.tsv
@@ -202,7 +207,14 @@ All flow-created outputs are written under `<outdir>/`:
       dotplot.png
       dotplot.original.pdf
       dotplot.original.png
+      ora_barplot.pdf
+      ora_barplot.png
+      gsea_nes_plot.pdf
+      gsea_nes_plot.png
+      gsea_enrichment_curves.pdf
+      gsea_enrichment_curves.png
       dotplot_source.tsv
+      plot_summary.tsv
   04_reports/
     commands.sh
     versions.tsv
@@ -216,13 +228,21 @@ Important files:
 
 - `03_results/enrichment/ora_results.tsv`: hypergeometric ORA table.
 - `03_results/enrichment/gsea_results.tsv`: fgsea preranked GSEA table.
-- `03_results/enrichment/dotplot.pdf` and `.png`: readable r2 plot of top ORA
+- `03_results/enrichment/dotplot.pdf` and `.png`: readable r3 plot of top ORA
   terms when ORA has rows, otherwise top GSEA terms, otherwise an empty-result
   plot. Long terms are wrapped and the canvas height scales with `--top-n`.
-- `03_results/enrichment/dotplot.original.pdf` and `.png`: original plot
-  emitted by `taf-enrichment-r`, preserved for audit/comparison.
+- `03_results/enrichment/dotplot.original.pdf` and `.png`: optimized
+  classic/original-style re-rendering with wider labels. The raw
+  dependency-generated plot remains in `02_intermediate/enrichment-r/`.
+- `03_results/enrichment/ora_barplot.pdf` and `.png`: top ORA terms as
+  adjusted-p-value bars.
+- `03_results/enrichment/gsea_nes_plot.pdf` and `.png`: top GSEA terms by
+  normalized enrichment score.
+- `03_results/enrichment/gsea_enrichment_curves.pdf` and `.png`: running
+  enrichment score curves for the top GSEA terms.
 - `03_results/enrichment/dotplot_source.tsv`: plot renderer, source table,
-  number of plotted terms, wrapping width, and canvas size.
+  number of plotted terms, wrapping width, extra plot counts, and canvas size.
+- `03_results/enrichment/plot_summary.tsv`: machine-readable plot inventory.
 - `04_reports/flow_summary.tsv`: flow-level counts and parameters.
 - `04_reports/commands.sh`: exact dependency command used by the flow.
 - `run.manifest.json`: input, parameter, dependency, count, and output manifest.

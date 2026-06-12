@@ -1,8 +1,8 @@
 [package]
 name = "rnaseq-enrichment-flow"
 kind = "flow"
-version = "0.1.0"
-release = 3
+version = "0.2.0"
+release = 1
 license = "Apache-2.0"
 main = "src/main.taf"
 
@@ -26,7 +26,7 @@ description = "TAFFISH RNA-seq enrichment flow for GMT-based ORA/GSEA from DE ge
 name = "rnaseq-enrichment-flow"
 type = "taffish-flow"
 homepage = "https://github.com/taffish/rnaseq-enrichment-flow"
-version = "0.1.0"
+version = "0.2.0"
 license = "Apache-2.0"
 description = "TAFFISH-maintained RNA-seq enrichment interpretation flow composed from the version-pinned enrichment-r TAFFISH tool app."
 

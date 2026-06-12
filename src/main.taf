@@ -20,13 +20,20 @@ ARGS
   20
 <(--seed)seed>
   1
+<(@:)enrichment-both-background-step>
+<(@:)enrichment-both-step>
+<(@:)enrichment-ora-background-step>
+<(@:)enrichment-ora-step>
+<(@:)enrichment-gsea-step>
+<(@:)render-dotplot-step>
+<(@:)render-extra-plots-step>
 
 RUN
 <taffish>
 set -eu
 
 FLOW_NAME="rnaseq-enrichment-flow"
-FLOW_VERSION="0.1.0-r3"
+FLOW_VERSION="0.2.0-r1"
 
 gene_list_arg="::gene-list::"
 ranked_genes_arg="::ranked-genes::"
@@ -540,6 +547,17 @@ enrich_cmd="$enrich_cmd --gene-sets $(sq "$local_gene_sets") --outdir $(sq "$enr
 if [ "$have_background" = yes ] && [ "$gene_list_count" -gt 0 ]; then
     enrich_cmd="$enrich_cmd --background $(sq "$normalized_background")"
 fi
+if [ "$gene_list_count" -gt 0 ] && [ "$ranked_gene_count" -gt 0 ] && [ "$have_background" = yes ]; then
+    enrich_cmd="$enrich_cmd ::(@:)enrichment-both-background-step::"
+elif [ "$gene_list_count" -gt 0 ] && [ "$ranked_gene_count" -gt 0 ]; then
+    enrich_cmd="$enrich_cmd ::(@:)enrichment-both-step::"
+elif [ "$gene_list_count" -gt 0 ] && [ "$have_background" = yes ]; then
+    enrich_cmd="$enrich_cmd ::(@:)enrichment-ora-background-step::"
+elif [ "$gene_list_count" -gt 0 ]; then
+    enrich_cmd="$enrich_cmd ::(@:)enrichment-ora-step::"
+else
+    enrich_cmd="$enrich_cmd ::(@:)enrichment-gsea-step::"
+fi
 
 step_name="02_enrichment"
 step_log="$logs_steps_dir/${step_name}.log"
@@ -549,15 +567,15 @@ if {
     printf '# step: %s\n' "$step_name"
     printf '# command: %s\n' "$enrich_cmd"
     if [ "$gene_list_count" -gt 0 ] && [ "$ranked_gene_count" -gt 0 ] && [ "$have_background" = yes ]; then
-        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --ranked-genes '"$normalized_ranked_genes"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite --background '"$normalized_background"' ]] </dev/null
+        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --ranked-genes '"$normalized_ranked_genes"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite --background '"$normalized_background"' ::(@:)enrichment-both-background-step:: ]] </dev/null
     elif [ "$gene_list_count" -gt 0 ] && [ "$ranked_gene_count" -gt 0 ]; then
-        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --ranked-genes '"$normalized_ranked_genes"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite ]] </dev/null
+        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --ranked-genes '"$normalized_ranked_genes"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite ::(@:)enrichment-both-step:: ]] </dev/null
     elif [ "$gene_list_count" -gt 0 ] && [ "$have_background" = yes ]; then
-        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite --background '"$normalized_background"' ]] </dev/null
+        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite --background '"$normalized_background"' ::(@:)enrichment-ora-background-step:: ]] </dev/null
     elif [ "$gene_list_count" -gt 0 ]; then
-        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite ]] </dev/null
+        [[taf: taf-enrichment-r-v0.1.0-r1 --gene-list '"$normalized_gene_list"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite ::(@:)enrichment-ora-step:: ]] </dev/null
     else
-        [[taf: taf-enrichment-r-v0.1.0-r1 --ranked-genes '"$normalized_ranked_genes"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite ]] </dev/null
+        [[taf: taf-enrichment-r-v0.1.0-r1 --ranked-genes '"$normalized_ranked_genes"' --gene-sets '"$local_gene_sets"' --outdir '"$enrich_run_dir"' --id-column gene_id --score-column score --min-size '"$min_size"' --max-size '"$max_size"' --pvalue-cutoff '"$pvalue_cutoff"' --padj-method '"$padj_method"' --top-n '"$top_n"' --seed '"$seed"' --overwrite ::(@:)enrichment-gsea-step:: ]] </dev/null
     fi
 } > "$step_log" 2>&1; then
     log "DONE  $step_name"
@@ -727,7 +745,7 @@ metadata <- data.table(
 fwrite(metadata, metadata_path, sep = "\t")
 RSCRIPT
 
-render_cmd="taf-enrichment-r-v0.1.0-r1 Rscript $(sq "$plot_script") $(sq "$enrichment_dir/ora_results.tsv") $(sq "$enrichment_dir/gsea_results.tsv") $(sq "$enrichment_dir/dotplot.pdf") $(sq "$enrichment_dir/dotplot.png") $(sq "$plot_metadata_file") $(sq "$top_n") $(sq "$plot_label_wrap_width")"
+render_cmd="taf-enrichment-r-v0.1.0-r1 Rscript ::(@:)render-dotplot-step:: $(sq "$plot_script") $(sq "$enrichment_dir/ora_results.tsv") $(sq "$enrichment_dir/gsea_results.tsv") $(sq "$enrichment_dir/dotplot.pdf") $(sq "$enrichment_dir/dotplot.png") $(sq "$plot_metadata_file") $(sq "$top_n") $(sq "$plot_label_wrap_width")"
 step_name="03_render_dotplot"
 step_log="$logs_steps_dir/${step_name}.log"
 record_command "$step_name" "$render_cmd"
@@ -735,7 +753,7 @@ log "START $step_name"
 if {
     printf '# step: %s\n' "$step_name"
     printf '# command: %s\n' "$render_cmd"
-    [[taf: taf-enrichment-r-v0.1.0-r1 Rscript '"$plot_script"' '"$enrichment_dir/ora_results.tsv"' '"$enrichment_dir/gsea_results.tsv"' '"$enrichment_dir/dotplot.pdf"' '"$enrichment_dir/dotplot.png"' '"$plot_metadata_file"' '"$top_n"' '"$plot_label_wrap_width"' ]] </dev/null
+    [[taf: taf-enrichment-r-v0.1.0-r1 Rscript ::(@:)render-dotplot-step:: '"$plot_script"' '"$enrichment_dir/ora_results.tsv"' '"$enrichment_dir/gsea_results.tsv"' '"$enrichment_dir/dotplot.pdf"' '"$enrichment_dir/dotplot.png"' '"$plot_metadata_file"' '"$top_n"' '"$plot_label_wrap_width"' ]] </dev/null
     test -s "$enrichment_dir/dotplot.pdf" || { printf 'ERROR: missing rendered dotplot.pdf\n' >&2; exit 2; }
     test -s "$enrichment_dir/dotplot.png" || { printf 'ERROR: missing rendered dotplot.png\n' >&2; exit 2; }
     test -s "$plot_metadata_file" || { printf 'ERROR: missing dotplot metadata\n' >&2; exit 2; }
@@ -1109,7 +1127,7 @@ extra_metadata <- data.table(
     "extra_plot_png_dpi"
   ),
   value = c(
-    "0.1.0-r3",
+    "0.2.0-r1",
     classic_dot$source,
     as.character(classic_terms),
     as.character(classic_wrap_width),
@@ -1148,7 +1166,7 @@ plot_summary <- data.table(
 fwrite(plot_summary, summary_path, sep = "\t")
 RSCRIPT
 
-extra_render_cmd="taf-enrichment-r-v0.1.0-r1 Rscript $(sq "$extra_plot_script") $(sq "$enrichment_dir/ora_results.tsv") $(sq "$enrichment_dir/gsea_results.tsv") $(sq "$normalized_ranked_genes") $(sq "$local_gene_sets") $(sq "$dotplot_original_pdf") $(sq "$dotplot_original_png") $(sq "$ora_barplot_pdf") $(sq "$ora_barplot_png") $(sq "$gsea_nes_plot_pdf") $(sq "$gsea_nes_plot_png") $(sq "$gsea_enrichment_curves_pdf") $(sq "$gsea_enrichment_curves_png") $(sq "$plot_metadata_file") $(sq "$plot_summary_file") $(sq "$top_n") $(sq "$plot_label_wrap_width") $(sq "$plot_classic_wrap_width") $(sq "$plot_curve_top_n")"
+extra_render_cmd="taf-enrichment-r-v0.1.0-r1 Rscript ::(@:)render-extra-plots-step:: $(sq "$extra_plot_script") $(sq "$enrichment_dir/ora_results.tsv") $(sq "$enrichment_dir/gsea_results.tsv") $(sq "$normalized_ranked_genes") $(sq "$local_gene_sets") $(sq "$dotplot_original_pdf") $(sq "$dotplot_original_png") $(sq "$ora_barplot_pdf") $(sq "$ora_barplot_png") $(sq "$gsea_nes_plot_pdf") $(sq "$gsea_nes_plot_png") $(sq "$gsea_enrichment_curves_pdf") $(sq "$gsea_enrichment_curves_png") $(sq "$plot_metadata_file") $(sq "$plot_summary_file") $(sq "$top_n") $(sq "$plot_label_wrap_width") $(sq "$plot_classic_wrap_width") $(sq "$plot_curve_top_n")"
 step_name="04_render_extra_plots"
 step_log="$logs_steps_dir/${step_name}.log"
 record_command "$step_name" "$extra_render_cmd"
@@ -1156,7 +1174,7 @@ log "START $step_name"
 if {
     printf '# step: %s\n' "$step_name"
     printf '# command: %s\n' "$extra_render_cmd"
-    [[taf: taf-enrichment-r-v0.1.0-r1 Rscript '"$extra_plot_script"' '"$enrichment_dir/ora_results.tsv"' '"$enrichment_dir/gsea_results.tsv"' '"$normalized_ranked_genes"' '"$local_gene_sets"' '"$dotplot_original_pdf"' '"$dotplot_original_png"' '"$ora_barplot_pdf"' '"$ora_barplot_png"' '"$gsea_nes_plot_pdf"' '"$gsea_nes_plot_png"' '"$gsea_enrichment_curves_pdf"' '"$gsea_enrichment_curves_png"' '"$plot_metadata_file"' '"$plot_summary_file"' '"$top_n"' '"$plot_label_wrap_width"' '"$plot_classic_wrap_width"' '"$plot_curve_top_n"' ]] </dev/null
+    [[taf: taf-enrichment-r-v0.1.0-r1 Rscript ::(@:)render-extra-plots-step:: '"$extra_plot_script"' '"$enrichment_dir/ora_results.tsv"' '"$enrichment_dir/gsea_results.tsv"' '"$normalized_ranked_genes"' '"$local_gene_sets"' '"$dotplot_original_pdf"' '"$dotplot_original_png"' '"$ora_barplot_pdf"' '"$ora_barplot_png"' '"$gsea_nes_plot_pdf"' '"$gsea_nes_plot_png"' '"$gsea_enrichment_curves_pdf"' '"$gsea_enrichment_curves_png"' '"$plot_metadata_file"' '"$plot_summary_file"' '"$top_n"' '"$plot_label_wrap_width"' '"$plot_classic_wrap_width"' '"$plot_curve_top_n"' ]] </dev/null
     test -s "$dotplot_original_pdf" || { printf 'ERROR: missing rendered dotplot.original.pdf\n' >&2; exit 2; }
     test -s "$dotplot_original_png" || { printf 'ERROR: missing rendered dotplot.original.png\n' >&2; exit 2; }
     test -s "$ora_barplot_pdf" || { printf 'ERROR: missing rendered ora_barplot.pdf\n' >&2; exit 2; }

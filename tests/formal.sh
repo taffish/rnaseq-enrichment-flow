@@ -66,7 +66,7 @@ echo "[FORMAL] build rnaseq-de-flow"
     taf check
     taf build
 )
-de_flow_cmd="$de_flow_dir/target/taf-rnaseq-de-flow-v0.1.0-r2"
+de_flow_cmd="$de_flow_dir/target/taf-rnaseq-de-flow-v0.2.0-r1"
 if [ ! -x "$de_flow_cmd" ]; then
     echo "formal: built DE flow command is missing or not executable: $de_flow_cmd" >&2
     exit 1
@@ -87,7 +87,7 @@ taf check
 echo "[FORMAL] taf build"
 taf build
 
-flow_cmd="$project_dir/target/taf-rnaseq-enrichment-flow-v0.1.0-r3"
+flow_cmd="$project_dir/target/taf-rnaseq-enrichment-flow-v0.2.0-r1"
 if [ ! -x "$flow_cmd" ]; then
     echo "formal: built flow command is missing or not executable: $flow_cmd" >&2
     exit 1
@@ -178,7 +178,7 @@ grep -F 'plot_terms	20' "$out/04_reports/flow_summary.tsv" >/dev/null
 grep -F 'plot_label_wrap_width	48' "$out/04_reports/flow_summary.tsv" >/dev/null
 grep -F 'classic_label_wrap_width	72' "$out/04_reports/flow_summary.tsv" >/dev/null
 grep -F 'plot_renderer	rnaseq-enrichment-flow' "$out/03_results/enrichment/dotplot_source.tsv" >/dev/null
-grep -F 'plot_family_version	0.1.0-r3' "$out/03_results/enrichment/dotplot_source.tsv" >/dev/null
+grep -F 'plot_family_version	0.2.0-r1' "$out/03_results/enrichment/dotplot_source.tsv" >/dev/null
 grep -F 'gsea_enrichment_curves' "$out/03_results/enrichment/plot_summary.tsv" >/dev/null
 grep -F 'taf-enrichment-r-v0.1.0-r1' "$out/04_reports/commands.sh" >/dev/null
 grep -F '"flow": "rnaseq-enrichment-flow"' "$out/run.manifest.json" >/dev/null

@@ -11,10 +11,11 @@ Package identity:
 - name: `rnaseq-enrichment-flow`
 - command: `taf-rnaseq-enrichment-flow`
 - kind: `flow`
-- version: `0.1.0-r3`
+- version: `0.2.0-r1`
 - license: Apache-2.0
+- repository: https://github.com/taffish/rnaseq-enrichment-flow
 
-## RNA-seq Flow Position
+## Flow Position
 
 This app is a reusable subflow in the TAFFISH bulk RNA-seq flow family. It can
 be run directly from compatible gene lists, ranked genes, GMT files, and
@@ -61,6 +62,53 @@ The script also uses ordinary shell utilities (`sh`, `awk`, `sed`, `sort`,
 bookkeeping, and provenance. The enrichment calculations and r3 plot rendering
 both run through the explicit `taf-enrichment-r` dependency; the flow does not
 call host-installed R, fgsea, clusterProfiler, or plotting packages.
+
+## Input Formats
+
+Gene list:
+
+```text
+gene_id
+YAL001C
+YBR160W
+YDR050C
+```
+
+Ranked genes:
+
+```text
+gene_id	score
+YAL001C	4.2
+YBR160W	2.1
+YDR050C	-1.7
+```
+
+Background:
+
+```text
+gene_id
+YAL001C
+YBR160W
+YDR050C
+YLR044C
+```
+
+GMT:
+
+```text
+GO:0000001	mitochondrion inheritance [biological_process]	YAL001C	YBR160W
+GO:0000002	mitochondrial genome maintenance [biological_process]	YDR050C
+```
+
+Rules:
+
+- Gene IDs are exact strings.
+- The flow does not map gene symbols, Ensembl IDs, RefSeq IDs, or systematic IDs.
+- If `--background` is provided, ORA query genes must be inside it.
+- Ranked gene scores must be numeric.
+- Duplicate gene IDs in list, ranked, or background inputs are rejected.
+- GMT set IDs must be unique.
+
 
 ## Usage
 
@@ -127,53 +175,32 @@ Common controls:
 - `--force`: replace the standard rnaseq-enrichment-flow output files inside an
   existing output directory.
 
-## Input Tables
+## Advanced Per-Step Passthrough
 
-Gene list:
+Most users should rely on the stable parameters above. `0.2.0-r1` also exposes
+optional `@step:` slots for native tool parameters that are not modeled by the
+flow. They default to empty and only affect the named call site when explicitly
+supplied:
 
-```text
-gene_id
-YAL001C
-YBR160W
-YDR050C
+```sh
+taf-rnaseq-enrichment-flow ... @render-dotplot-step: --vanilla @:
 ```
 
-Ranked genes:
+The general syntax is documented in the
+[TAFFISH Flow Developer Guide (English)](https://github.com/taffish/taffish-docs/blob/main/en/taf-flow-developer-guide.en.md)
+and [TAFFISH Flow 开发者指南（中文）](https://github.com/taffish/taffish-docs/blob/main/zh/taf-flow-developer-guide.cn.md).
 
-```text
-gene_id	score
-YAL001C	4.2
-YBR160W	2.1
-YDR050C	-1.7
-```
+| Slot | Native call site |
+| --- | --- |
+| `@enrichment-both-background-step: ... @:` | ORA+GSEA with background genes |
+| `@enrichment-both-step: ... @:` | ORA+GSEA without background genes |
+| `@enrichment-ora-background-step: ... @:` | ORA with background genes |
+| `@enrichment-ora-step: ... @:` | ORA without background genes |
+| `@enrichment-gsea-step: ... @:` | GSEA-only enrichment |
+| `@render-dotplot-step: ... @:` | `Rscript` invocation for the main dotplot |
+| `@render-extra-plots-step: ... @:` | `Rscript` invocation for extra plots |
 
-Background:
-
-```text
-gene_id
-YAL001C
-YBR160W
-YDR050C
-YLR044C
-```
-
-GMT:
-
-```text
-GO:0000001	mitochondrion inheritance [biological_process]	YAL001C	YBR160W
-GO:0000002	mitochondrial genome maintenance [biological_process]	YDR050C
-```
-
-Rules:
-
-- Gene IDs are exact strings.
-- The flow does not map gene symbols, Ensembl IDs, RefSeq IDs, or systematic IDs.
-- If `--background` is provided, ORA query genes must be inside it.
-- Ranked gene scores must be numeric.
-- Duplicate gene IDs in list, ranked, or background inputs are rejected.
-- GMT set IDs must be unique.
-
-## Outputs
+## Output Layout
 
 All flow-created outputs are written under `<outdir>/`:
 
@@ -247,7 +274,7 @@ Important files:
 - `04_reports/commands.sh`: exact dependency command used by the flow.
 - `run.manifest.json`: input, parameter, dependency, count, and output manifest.
 
-## Connection From DE Flow
+## Data Flow and Contracts
 
 `rnaseq-de-flow` writes the two main inputs expected here:
 
@@ -268,9 +295,18 @@ Enrichment results depend heavily on the gene universe, ID system, gene-set
 source, redundancy, and thresholds. The flow records these choices but does not
 decide whether a term is biologically causal or experimentally validated.
 
+## Testing
+
 Smoke uses a tiny artificial GMT to verify the execution path. Formal RNA-seq
 testing uses the central yeast SNF2 count data plus the SGD GO-derived
 GMT/background bundle when available. The central data tree can be prepared
 with `repos/apps/bio/flows/rna-seq/test-data/yeast/rnaseq-yeast-get-data`;
 downstream formal tests read it via `TAFFISH_RNASEQ_TESTDATA` or the default
 local `test-data/yeast/data/03_results` path.
+
+## License and Citation
+
+TAFFISH app packaging: Apache-2.0.
+
+Upstream tools keep their own license and citation requirements. See the
+dependency app records and upstream projects for details.

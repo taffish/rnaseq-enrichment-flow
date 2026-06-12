@@ -1,4 +1,4 @@
-rnaseq-enrichment-flow 0.1.0-r3
+rnaseq-enrichment-flow 0.2.0-r1
 
 Purpose:
   Run offline RNA-seq enrichment interpretation from DE gene lists, ranked
@@ -6,11 +6,6 @@ Purpose:
   writes ORA and preranked GSEA tables, publication-oriented enrichment plots,
   summaries, logs, commands, versions, methods, and a manifest under one
   explicit output directory.
-
-Flow family role:
-  This is a TAFFISH RNA-seq subflow. It can be run directly from compatible DE
-  gene-list inputs, and its enrichment outputs are intended for
-  rnaseq-standard-flow orchestration.
 
 Usage:
   taf-rnaseq-enrichment-flow \
@@ -74,6 +69,49 @@ Common options:
       Replace the standard rnaseq-enrichment-flow output files inside an
       existing output directory.
 
+Key outputs:
+  <outdir>/03_results/enrichment/ora_results.tsv
+      Over-representation analysis table.
+
+  <outdir>/03_results/enrichment/gsea_results.tsv
+      Preranked GSEA table.
+
+  <outdir>/03_results/enrichment/enrichment_summary.tsv
+      Compact enrichment summary.
+
+  <outdir>/03_results/enrichment/dotplot.pdf and .png
+      Primary readable ORA or GSEA dotplot.
+
+  <outdir>/03_results/enrichment/dotplot.original.pdf and .png
+      Optimized classic/original-style dotplot.
+
+  <outdir>/03_results/enrichment/ora_barplot.* and gsea_*plot.*
+      Additional ORA and GSEA plots in PDF/PNG.
+
+  <outdir>/04_reports/
+      commands.sh, versions.tsv, enrichment_versions.tsv, methods.txt,
+      flow_summary.tsv, and provenance.
+
+Upstream/downstream:
+  Upstream:
+    rnaseq-de-flow provides significant_genes.tsv and ranked_genes.tsv.
+    User supplies compatible GMT and optional background.
+
+  Downstream:
+    rnaseq-report-flow can collect the enrichment output directory.
+
+Advanced step passthrough:
+  Optional expert slots for native tool parameters. They default to empty
+  and are not needed for normal use.
+
+  @enrichment-both-background-step: ... @: ORA+GSEA with background genes.
+  @enrichment-both-step: ... @: ORA+GSEA without background genes.
+  @enrichment-ora-background-step: ... @: ORA with background genes.
+  @enrichment-ora-step: ... @: ORA without background genes.
+  @enrichment-gsea-step: ... @: GSEA-only enrichment.
+  @render-dotplot-step: ... @: Rscript invocation for the main dotplot.
+  @render-extra-plots-step: ... @: Rscript invocation for extra plots.
+
 Input examples:
   gene_list.tsv:
     gene_id
@@ -88,63 +126,14 @@ Input examples:
   gene_sets.gmt:
     set_id<TAB>description<TAB>gene1<TAB>gene2<TAB>gene3
 
-Output tree:
-  <outdir>/00_inputs/gene_list.tsv
-  <outdir>/00_inputs/ranked_genes.tsv
-  <outdir>/00_inputs/gene_sets.gmt
-  <outdir>/00_inputs/background.tsv
-  <outdir>/01_logs/flow.log
-  <outdir>/01_logs/steps/01_validate_inputs.log
-  <outdir>/01_logs/steps/02_enrichment.log
-  <outdir>/01_logs/steps/03_render_dotplot.log
-  <outdir>/01_logs/steps/04_render_extra_plots.log
-  <outdir>/02_intermediate/
-  <outdir>/03_results/enrichment/ora_results.tsv
-  <outdir>/03_results/enrichment/gsea_results.tsv
-  <outdir>/03_results/enrichment/enrichment_summary.tsv
-  <outdir>/03_results/enrichment/dotplot.pdf
-  <outdir>/03_results/enrichment/dotplot.png
-  <outdir>/03_results/enrichment/dotplot.original.pdf
-  <outdir>/03_results/enrichment/dotplot.original.png
-  <outdir>/03_results/enrichment/ora_barplot.pdf
-  <outdir>/03_results/enrichment/ora_barplot.png
-  <outdir>/03_results/enrichment/gsea_nes_plot.pdf
-  <outdir>/03_results/enrichment/gsea_nes_plot.png
-  <outdir>/03_results/enrichment/gsea_enrichment_curves.pdf
-  <outdir>/03_results/enrichment/gsea_enrichment_curves.png
-  <outdir>/03_results/enrichment/dotplot_source.tsv
-  <outdir>/03_results/enrichment/plot_summary.tsv
-  <outdir>/04_reports/commands.sh
-  <outdir>/04_reports/versions.tsv
-  <outdir>/04_reports/enrichment_versions.tsv
-  <outdir>/04_reports/methods.txt
-  <outdir>/04_reports/flow_summary.tsv
-  <outdir>/run.manifest.json
-
-Dependencies:
-  taf-enrichment-r 0.1.0-r1
-
-Plot outputs:
-  dotplot.pdf/png
-      Primary readable ORA or GSEA dotplot.
-
-  dotplot.original.pdf/png
-      Optimized classic/original-style dotplot with wider labels.
-
-  ora_barplot.pdf/png
-      ORA top terms as adjusted-p-value bars.
-
-  gsea_nes_plot.pdf/png
-      GSEA terms by normalized enrichment score.
-
-  gsea_enrichment_curves.pdf/png
-      Running enrichment score curves for top GSEA terms.
-
 Boundaries:
   r3 is offline and GMT-driven. It does not generate DE results, download
   gene sets, infer organisms, convert gene IDs, run online KEGG/MSigDB/Enrichr
   queries, or decide biological interpretation. Gene set source, ID system,
   background universe, and thresholds remain user responsibilities.
+
+Detailed documentation:
+  https://github.com/taffish/rnaseq-enrichment-flow
 
 Wrapper options:
   -h, --help       Show this help.
